@@ -1,0 +1,76 @@
+#!/usr/bin/env ruby
+
+#Set Requirements
+require 'watir'
+require 'selenium-webdriver'
+require 'mail'
+
+#Using this class to close a random "Give us feedback" pop-up
+class WatirProxy
+  attr_reader :subject
+  def initialize(browser)
+    @subject = browser
+  end
+
+  def method_missing(method, *args)
+    if subject.div(:id => 'acsMainInvite').exists?
+       subject.link(:title => 'No, thanks').click
+    end
+
+    subject.send(method, *args)
+  end
+end
+
+#Set variables
+browser = WatirProxy.new(Watir::Browser.new(:chrome))
+
+#Key is site URL, value is check-in[0]/check-out[1] date you want to stay there
+list = {'https://www.recreation.gov/entranceDetails.do?contractCode=NRSO&parkId=72203&entranceId=315542' => ['08/16/2018', '1']}
+
+#Browser code to loop through sites and corresponding dates and send email if it finds something
+list.each do |site, date|
+  browser.goto(site)
+  sleep 1
+  browser.select(:id => "permitTypeId").select("Overnight")
+  sleep 1
+  browser.text_field(:id => "entryDate").set(date[0])
+  sleep 1
+  browser.text_field(:id => "pGroupSize").set(date[1])
+  sleep 1
+  browser.button(:name => "permitAvailabilitySearchButton").click
+  sleep 1
+  if
+    browser.td(:id => "avail1", :class => %w(status a)).exists?
+  then
+    puts "I'm on to something"
+message = <<MESSAGE_END
+    There is permit availability at an entrance you are watching. The details are below:
+
+    Site: #{site}
+    Entrance Date: #{date[0]}
+    Group Size: #{date[1]}
+MESSAGE_END
+
+  options = { :address              => "smtp.gmail.com",
+              :port                 => 587,
+              :user_name            => 'your_gmail',
+              :password             => 'gmail_pass',
+              :authentication       => 'plain',
+              :enable_starttls_auto => true  }
+
+  Mail.defaults do
+    delivery_method :smtp, options
+  end
+
+  Mail.deliver do
+    to 'to_email'
+    from 'from_email'
+    subject 'There is permit availability at an entrance you are watching!'
+    body "#{message}"
+  end
+ else
+    puts "No Availability"
+  end
+end
+
+browser.close
