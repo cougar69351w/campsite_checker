@@ -1,0 +1,40 @@
+---
+applications_settings:
+  browser: chrome
+  pool_size: 7
+  watir_debug: error
+email:
+  send: true
+  settings:
+    username: example@gmail.com
+    password: mordor
+    server: smtp.gmail.com
+    port: 587
+site_data:
+  upper-pines:
+    url: https://www.recreation.gov/campgroundDetails.do?contractCode=NRSO&parkId=70925
+    dates: &dates
+      start_dates:
+      - 09/15/2018
+      - 09/16/2018
+      end_dates:
+      - 09/17/2018
+      - 09/18/2018
+   lower-pines:
+     url: https://www.recreation.gov/camping/lower-pines/r/campgroundDetails.do?contractCode=NRSO&parkId=70928
+     dates: *dates
+   north-pines:
+     url: https://www.recreation.gov/camping/north-pines/r/campgroundDetails.do?contractCode=NRSO&parkId=70927
+     dates: *dates
+  crane-flat:
+    url: https://www.recreation.gov/camping/crane-flat/r/campgroundDetails.do?contractCode=NRSO&parkId=70930
+    dates: *dates
+  hodgdon-meadow:
+    url: https://www.recreation.gov/camping/crane-flat/r/campgroundDetails.do?contractCode=NRSO&parkId=70930
+    dates: *dates
+   tuolumne-meadows:
+     url: https://www.recreation.gov/campgroundDetails.do?contractCode=NRSO&parkId=70926
+     dates: *dates
+  wawona:
+    url: https://www.recreation.gov/camping/wawona/r/campgroundDetails.do?contractCode=NRSO&parkId=70924
+    dates: *dates

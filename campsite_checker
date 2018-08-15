@@ -2,8 +2,12 @@
 
 #Set Requirements
 require 'watir'
+require 'headless'
 require 'selenium-webdriver'
 require 'mail'
+require 'thread'
+require 'pp'
+require 'yaml'
 
 #Using this class to close a random "Give us feedback" pop-up
 class WatirProxy
@@ -21,54 +25,138 @@ class WatirProxy
   end
 end
 
-#Set variables
-browser = WatirProxy.new(Watir::Browser.new(:chrome))
+# Wrap our mailer bits in a class for ease of reuse
+class Mailer
+  def initialize(args)
 
-#Key is site URL, value is check-in[0]/check-out[1] date you want to stay there
-list = {'https://www.recreation.gov/camping/watchman-campground/r/campgroundDetails.do?contractCode=NRSO&parkId=70923' => ['06/21/2018', '06/23/2018'], 'https://www.recreation.gov/camping/grey-cliffs-campground/r/campgroundDetails.do?contractCode=NRSO&parkId=142142' => ['06/22/2018', '06/24/2018']}
+    tls = false
+    if args["port"] == 587
+      tls = true
+    end
 
-#Browser code to loop through sites and corresponding dates and send email if it finds something
-list.each do |site, date|
-  browser.goto(site)
-  sleep 1
-  browser.text_field(:id => "arrivalDate").set(date[0])
-  sleep 1
-  browser.text_field(:id => "departureDate").set(date[1])
-  sleep 1
-  browser.button(:id => "filter").click
-  sleep 1
-  if
-    browser.link(:class => %w(book now)).exists?
-  then
-    puts "I'm on to something"
-message = <<MESSAGE_END
+    options = {
+      :address => args["server"],
+      :port => args["port"],
+      :user_name => args["username"],
+      :password => args["password"],
+      :authentication => 'plain',
+      :enable_starttls_auto => tls
+    }
+
+    Mail.defaults do
+      delivery_method(:smtp, options)
+    end
+
+  end
+
+  def send_email(to, from, subject, message)
+
+    Mail.deliver do
+      to to
+      from from
+      subject subject
+      body message
+    end
+  end
+
+end
+
+class RecreationGovChecker
+
+  def initialize()
+    @config_data = YAML::load_file(File.join(__dir__, 'config.yaml'))
+
+    Watir.logger.level = @config_data["applications_settings"]["watir_debug"].to_sym || :debug
+    @pool_size = @config_data["applications_settings"]["pool_size"] || 7
+    @browser = @config_data["applications_settings"]["browser"].to_sym || :chrome
+    @send_email = @config_data["email"]["send"] || false
+
+    if @send_email
+      @mailer = Mailer.new(@config_data["email"]["settings"])
+    end
+
+    @jobs = Queue.new
+    fill_job_queue
+  end
+
+  def check_all_campsites(site, url, start_date, end_date)
+    result = false
+    browser = WatirProxy.new(Watir::Browser.new(@browser))
+    browser.goto(url)
+    sleep 1
+    browser.text_field(:id => "arrivalDate").set(start_date)
+    sleep 1
+    browser.text_field(:id => "departureDate").set(end_date)
+    sleep 1
+    browser.button(:id => "filter").click
+    sleep 1
+
+    if browser.link(:class => %w(book now)).exists?
+      render_availability_message(true, site, start_date, end_date)
+      result = true
+    else
+      render_availability_message(false, site, start_date, end_date)
+    end
+
+    browser.close
+
+    return result
+  end
+
+  def render_availability_message(exists, site, start_date, end_date)
+    if exists
+      puts "Availability from #{start_date} to #{end_date} for #{site}"
+    else
+      puts "No Availability from #{start_date} to #{end_date} for #{site}"
+    end
+  end
+
+  def render_email_message(site, url, start_date, end_date)
+    message = <<MESSAGE_END
     There is availability at a campsite you are watching. The details are below:
 
     Site: #{site}
-    Check-In: #{date[0]}
-    Check-Out: #{date[1]}
+    URL: #{url}
+    Check-In: #{start_date}
+    Check-Out: #{end_date}
 MESSAGE_END
-
-  options = { :address              => "smtp.gmail.com",
-              :port                 => 587,
-              :user_name            => 'your_gmail_account',
-              :password             => 'your_gmail_password',
-              :authentication       => 'plain',
-              :enable_starttls_auto => true  }
-
-  Mail.defaults do
-    delivery_method :smtp, options
+    return message
   end
 
-  Mail.deliver do
-    to 'to_email@gmail.com'
-    from 'from_email@gmail.com'
-    subject 'There is availability at a campsite you are watching!'
-    body "#{message}"
+  def fill_job_queue
+
+    @config_data["site_data"].each do |site, parameters|
+      parameters["dates"]["start_dates"].each do |start_date|
+        parameters["dates"]["end_dates"].each do |end_date|
+          @jobs << {"name" => site, "url" => parameters["url"], "start_date" => start_date, "end_date" => end_date }
+        end
+      end
+    end
   end
- else
-    puts "No Availability"
+
+  def check_availability
+    workers = (@pool_size).times.map do
+      Thread.new do
+        begin
+          while x = @jobs.pop(true)
+            if @send_email && check_all_campsites(x["name"], x["url"], x["start_date"], x["end_date"])
+              @mailer.send_email(
+                @config_data["email"]["settings"]["username"],
+                @config_data["email"]["settings"]["username"],
+                "found availability for #{x["name"]}",
+                render_email_message(x["name"], x["url"], x["start_date"], x["end_date"])
+              )
+            end
+          end
+        rescue ThreadError => err
+          #puts err
+        end
+      end
+    end
+
+    workers.map(&:join)
   end
+
 end
 
-browser.close
+RecreationGovChecker.new().check_availability
